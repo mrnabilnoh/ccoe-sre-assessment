@@ -1,0 +1,60 @@
+sequenceDiagram
+  participant Probe as CUJ probes / regional evidence
+  participant IC as Incident Commander
+  participant Auth as DR Recovery Authority
+  participant Risk as Business / Risk Authority
+  participant SSM as SSM Automation
+  participant ARC as Route 53 ARC
+  participant DB as Aurora Global DB
+  participant MSK as MSK Replicator
+  participant SG as Singapore primary
+  participant DR as Malaysia recovery Region
+  participant Ext as External providers
+  Probe->>IC: Customer impact + independent regional evidence
+  IC->>IC: Declare incident, single alarm alone is insufficient
+  IC->>Auth: Request recovery authorization
+  Auth->>SSM: Start approved failover runbook
+  SSM->>DB: Capture lag / last durable transaction
+  SSM->>MSK: Capture replication lag / offsets / topic state
+  alt RPO is within target
+    SSM->>SSM: Record measured RPO
+  else RPO exceeds target or cannot be confirmed
+    SSM->>Risk: Request documented RPO exception decision
+    alt Exception approved
+      Risk-->>SSM: Record approved exception
+    else Exception denied
+      Risk-->>SSM: Deny exception
+      SSM-->>Auth: Abort failover, do not promote
+      Note over SSM,ARC: Promotion and traffic switch are skipped
+    end
+  end
+  opt Continue only if RPO target met or exception approved
+  SSM->>SG: Fence primary write path
+  SG-->>SSM: Confirm old writer cannot accept writes
+  alt Write fencing uncertain
+    SSM-->>Auth: Stop runbook and escalate
+  else Fencing confirmed
+    SSM->>DB: Promote Malaysia secondary
+    SSM->>MSK: Cut producer/consumer ownership to Malaysia
+    SSM->>DR: Activate/scale services and verify IAM, KMS, network, telemetry
+    DR->>Ext: Validate provider connectivity / allowlists / status checks
+    DR->>DR: Run sign-in, balance, payment preflight and ledger checks
+    Auth->>SSM: Approve traffic switch after readiness gate
+    SSM->>ARC: Set routing controls to Malaysia (on/off)
+    ARC-->>DR: Route customer traffic to Malaysia
+    DR->>IC: Report CUJ health, lag, pending age, and duplicate signals
+    IC->>IC: Gate A: service restored, Gate B: reconciliation complete
+  end
+  end
+
+  rect rgb(245, 245, 245)
+    Note over Auth,SSM: Failback is a separate approved runbook. Malaysia remains the only writer until synchronization and reconciliation pass.
+    Auth->>SSM: Start approved failback after Singapore readiness
+    SSM->>DB: Synchronize and verify Aurora state back to Singapore
+    SSM->>MSK: Verify topics, offsets, and ownership for Singapore
+    SSM->>DR: Reconcile pending payments and delayed events
+    SSM->>SG: Validate capacity and critical journeys
+    Auth->>SSM: Approve failback routing change
+    SSM->>ARC: Set routing controls to Singapore (on/off)
+    ARC-->>SG: Route customer traffic to Singapore
+  end
