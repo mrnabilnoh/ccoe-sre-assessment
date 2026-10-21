@@ -1,0 +1,27 @@
+flowchart LR
+  CLIENT[Customer app<br/>OTel client span + W3C traceparent] --> CF[CloudFront<br/>edge metrics, logs, request ID]
+  CF --> WAF[AWS WAF<br/>native metrics/logs]
+  WAF --> API[API Gateway<br/>managed X-Ray trace optional]
+  API --> EKS[EKS services<br/>OTel instrumentation]
+  EKS --> AUR[Aurora<br/>native metrics + Database Insights]
+  EKS --> MSK[MSK<br/>native broker/lag metrics]
+  EKS --> EXT[External API client spans]
+  MSK --> CONSUMER[Consumer OTel spans<br/>context from message headers]
+  CF -. X-Amz-Cf-Id / edge request ID correlation .-> EKS
+
+  EKS --> COLLECTOR[ADOT / CloudWatch agent<br/>OTel collection]
+  CONSUMER --> COLLECTOR
+  COLLECTOR --> APP[CloudWatch Application Signals<br/>service health, SLOs, application map]
+  COLLECTOR --> TRACE[AWS X-Ray service<br/>Trace Map + Transaction Search]
+  API -. managed trace where enabled .-> TRACE
+  CF -. edge logs and timing .-> EDGELOG[CloudWatch edge telemetry]
+  AUR -. DB load/wait/query evidence .-> DBI[CloudWatch Database Insights]
+  MSK -. broker/consumer lag .-> CW[CloudWatch native service metrics]
+  WAF --> CW
+  CI[CloudWatch Container Insights] --> CW
+
+  SYN[CloudWatch Synthetics<br/>sign-in, balance, payment preflight] --> APP
+  RUM[CloudWatch RUM<br/>client experience, if approved] --> APP
+  APP --> ALERT[Grouped alert routes<br/>journey, owner, runbook]
+  TRACE --> ALERT
+  LOG[CloudWatch Logs<br/>redacted + data protection masking] --> S3[Encrypted S3 archive<br/>retention per approved policy]
