@@ -1,0 +1,36 @@
+flowchart LR
+  subgraph Auth["Candidate CUJ: Sign in"]
+    direction TB
+    A1[Customer] --> A2[CloudFront + WAF]
+    A2 --> A3[API Gateway]
+    A3 --> A4[EKS: Identity service]
+    A4 --> A5[Usable authenticated session]
+    A4 -. conditional risk assessment .-> RISK[External fraud/risk provider]
+    RISK -. approved result when required .-> A5
+    AF["Failure scenarios<br/>Edge/API impairment<br/>Identity or risk-provider outage<br/>AZ loss, bad release, regional loss<br/>Retry amplification"]
+  end
+
+  subgraph Balance["Candidate CUJ: View balance"]
+    direction TB
+    B1[Customer with valid session] --> B2[CloudFront + WAF]
+    B2 --> B3[API Gateway]
+    B3 --> B4[EKS: Account/balance service]
+    B4 --> B5[(Aurora)]
+    B5 --> B6[Accurate balance or clear unavailable state]
+    BF["Failure scenarios<br/>Edge/API impairment<br/>Aurora/read-path failure or stale data<br/>AZ loss, bad release, regional loss<br/>Retry amplification"]
+  end
+
+  subgraph Payment["Candidate CUJ: Make a payment"]
+    direction TB
+    P1[Customer with valid session] --> P2[CloudFront + WAF]
+    P2 --> P3[API Gateway]
+    P3 --> P4[EKS: Payment service]
+    P4 --> P5[(Aurora ledger: durable record)]
+    P5 --> P6[MSK: processing event]
+    P6 --> P7[EKS: Payment/status consumer]
+    P7 --> P8[External payment provider]
+    P8 --> P9[Provider result / status inquiry]
+    P9 --> P5
+    P4 --> P10[Accepted, rejected, or pending response]
+    PF["Failure scenarios<br/>Edge/API impairment<br/>Ledger or MSK failure/lag<br/>Payment-provider outage<br/>AZ loss, bad release, regional loss<br/>Retry amplification and unknown outcome"]
+  end
