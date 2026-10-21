@@ -1,0 +1,46 @@
+stateDiagram-v2
+  state "Application circuit breaker" as Breaker {
+    [*] --> Closed
+    Closed --> Open: classified timeout/failure threshold exceeded
+    Open --> HalfOpen: bounded cool-down elapsed
+    HalfOpen --> Closed: limited safe checks succeed
+    HalfOpen --> Open: check fails
+    Closed: Per dependency with provider-specific limits
+    Open: Stop calls and use journey fallback
+    HalfOpen: Limited safe checks, no synthetic payment
+  }
+
+  state "Payment write" as Payment {
+    [*] --> CheckRedis
+    CheckRedis --> AuroraCheck: Redis hit/miss/unavailable
+    AuroraCheck --> DuplicateResponse: same key + same request
+    AuroraCheck --> Reject: same key + different request
+    AuroraCheck --> AuroraCommit: new operation
+    AuroraCommit --> OutboxPublish: durable ledger + outbox commit
+    OutboxPublish --> MSKEvent: publish payment event
+    MSKEvent --> PaymentConsumer: consume event
+    PaymentConsumer --> ProviderCall
+    ProviderCall --> FinalOutcome: definitive provider result
+    ProviderCall --> Pending: timeout / outcome unknown
+    Pending --> Reconcile: status inquiry / reconciliation
+    Reconcile --> FinalOutcome: confirmed result
+  }
+
+  state "Retry budget" as Budget {
+    [*] --> Available
+    Available --> Exhausted: attempt or time budget reached
+    Exhausted --> Available: recovery confirmed and budget reset
+  }
+
+  state "MSK consumer recovery" as Kafka {
+    [*] --> ReadEvent
+    ReadEvent --> Process: offset not committed
+    Process --> CommitOffset: durable processing succeeds
+    Process --> BoundedRetry: transient failure
+    BoundedRetry --> Process: within retry budget
+    BoundedRetry --> Quarantine: repeated failure
+    Quarantine --> CommitSourceOffset: quarantine write confirmed
+    CommitSourceOffset --> AwaitFix: owner investigates
+    AwaitFix --> ControlledReplay: authorized after fix
+    ControlledReplay --> Process: same event ID / idempotent consumer
+  }
