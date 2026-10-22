@@ -1,0 +1,21 @@
+flowchart TD
+  SIG[Application Signals / OTel traces / CloudWatch metrics / Synthetics] --> TRIAGE{Triage customer impact and financial risk}
+  TRIAGE -->|No current impact| SEV4[SEV4 ticket / planned work]
+  TRIAGE -->|Limited or intermittent impact| SEV3[SEV3 owning service team]
+  TRIAGE -->|Significant impact / workaround| SEV2[SEV2 coordinated response]
+  TRIAGE -->|Widespread journey failure / financial-integrity risk| SEV1[SEV1 immediate IC and bridge]
+  SEV1 --> BRIDGE[Open bridge + incident record]
+  SEV2 --> BRIDGE
+  BRIDGE --> ROLES[IC assigns Operations or Technical Support recorder]
+  ROLES --> OWNERS[Identify affected journey owner and service/provider on-call owners]
+  OWNERS --> EVID[Capture lightweight evidence<br/>Aurora, MSK, ARC, SSM, CloudWatch, trace/request IDs]
+  EVID --> DECIDE[Decision log<br/>UTC, evidence, approver, action owner, rollback]
+  DECIDE --> ESC[Escalate immediately when triggered<br/>Recovery, Business/Risk, Security, service/provider owner]
+  ESC --> MIT[Mitigate / rollback / load shed / approved DR runbook]
+  ESC --> COMMS[Status updates<br/>SEV1 15m / SEV2 30m proposed targets]
+  COMMS --> VERIFY{Customer impact resolved and data safe?}
+  VERIFY -->|No| DECIDE
+  VERIFY -->|Yes| HAND{Shift change or incident closure?}
+  HAND -->|Shift change| ACCEPT[Verbal + written handover<br/>incoming IC explicitly accepts command]
+  ACCEPT --> DECIDE
+  HAND -->|Closure| PIR[Close after reconciliation<br/>then blameless RCA + owned actions]
