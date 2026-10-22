@@ -1,0 +1,103 @@
+%%{init: {"themeVariables": {"fontSize": "18px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 42}}}%%
+flowchart LR
+  subgraph INGRESS["CUSTOMER TRAFFIC"]
+    direction TB
+    C[Customers] --> PUBDNS[Route 53 public DNS] --> CF[CloudFront]
+    WAF[AWS WAF<br/>DDoS and managed rules] -. protects .-> CF
+    CF --> ORIGIN[Regional origin selection<br/>ARC-controlled Route 53 health check]
+  end
+
+  subgraph REGIONS["AWS REGIONS"]
+    direction TB
+    subgraph PRIMARY["PRIMARY: ap-southeast-1 Singapore"]
+      direction LR
+      API1[API Gateway<br/>Regional endpoint]
+      subgraph PVPC["Primary VPC: private subnets across AZs"]
+        direction TB
+        EKS1[Amazon EKS<br/>Sign in / View balance / Make a payment<br/>Karpenter + HPA, OTel-instrumented]
+        DATA1[(Aurora Global DB<br/>primary writer)]
+        MSK1[(Amazon MSK)]
+        REDIS1[(ElastiCache Redis<br/>fast idempotency lookup)]
+        EKS1 --> DATA1
+        EKS1 --> MSK1
+        EKS1 --> REDIS1
+      end
+      API1 --> EKS1
+    end
+    subgraph RECOVERY["RECOVERY: ap-southeast-5 Kuala Lumpur"]
+      direction LR
+      API2[API Gateway<br/>Regional endpoint]
+      subgraph RVPC["Recovery VPC: private subnets across AZs; warm standby"]
+        direction TB
+        EKS2[Amazon EKS<br/>warm capacity for recovery load]
+        DATA2[(Aurora Global DB<br/>secondary, promote after approval)]
+        MSK2[(Amazon MSK<br/>replicated topics and offsets)]
+        REDIS2[(ElastiCache Redis<br/>rebuildable cache)]
+        EKS2 --> DATA2
+        EKS2 --> MSK2
+        EKS2 --> REDIS2
+      end
+      API2 --> EKS2
+    end
+  end
+
+  ORIGIN --> API1
+  ORIGIN -. approved regional switch .-> API2
+  DATA1 == cross-Region replication ==> DATA2
+  MSK1 == MSK Replicator ==> MSK2
+
+  subgraph PROVIDERS["EXTERNAL PROVIDER TRUST BOUNDARY"]
+    direction TB
+    RISK[Fraud/risk provider<br/>conditional sign-in check]
+    PSP[Payment provider]
+  end
+  PRIMARY -. conditional outbound calls .-> PROVIDERS
+  RECOVERY -. conditional outbound calls .-> PROVIDERS
+
+  subgraph RECOVERY_CONTROL["HUMAN-AUTHORIZED RECOVERY CONTROL"]
+    direction LR
+    IC[Incident Commander<br/>declares and coordinates]
+    AUTH[DR Recovery Authority<br/>approves fencing and promotion]
+    SSM[SSM Automation<br/>failover/failback runbooks]
+    ARC[Route 53 ARC<br/>on/off traffic switch]
+    IC --> AUTH --> SSM --> ARC
+  end
+  SSM -. approved recovery runbook .-> RECOVERY
+  ARC -. updates .-> ORIGIN
+
+  subgraph OPS["OBSERVABILITY AND SECURITY"]
+    direction TB
+    OTel[ADOT / OTel Collector]
+    APP[CloudWatch Application Signals<br/>health, SLOs, application map]
+    XR[AWS X-Ray service<br/>Trace Map / Transaction Search]
+    SYN[CloudWatch Synthetics<br/>safe journey checks]
+    CW[CloudWatch native telemetry<br/>Container Insights / Database Insights]
+    LOGS[CloudWatch Logs<br/>redaction / data protection]
+    AUDIT[CloudTrail + Config<br/>encrypted S3 evidence]
+    SEC[Security controls<br/>IAM / IRSA least privilege<br/>KMS customer-managed keys]
+    OTel --> APP
+    OTel --> XR
+    SYN --> APP
+    LOGS --> AUDIT
+  end
+  REGIONS -. application telemetry .-> OTel
+  INGRESS -. edge logs, timing, request ID .-> CW
+  REGIONS -. native service metrics .-> CW
+  SEC -. protects .-> REGIONS
+
+  classDef ingress fill:#e8f1ff,stroke:#2563eb
+  classDef primary fill:#e9faf5,stroke:#16856b
+  classDef recovery fill:#eef7ff,stroke:#2776a8
+  classDef data fill:#fff4e8,stroke:#c76b22
+  classDef control fill:#f4efff,stroke:#7050a8
+  classDef ops fill:#f8f6ff,stroke:#6950a8
+  classDef security fill:#fff0f0,stroke:#b94747
+  classDef ext fill:#f5f5f5,stroke:#555
+  class C,PUBDNS,CF,WAF,ORIGIN,API1,API2 ingress
+  class EKS1 primary
+  class EKS2 recovery
+  class DATA1,DATA2,MSK1,MSK2,REDIS1,REDIS2 data
+  class IC,AUTH,SSM,ARC control
+  class OTel,APP,XR,SYN,CW,LOGS,AUDIT ops
+  class SEC security
+  class RISK,PSP ext
